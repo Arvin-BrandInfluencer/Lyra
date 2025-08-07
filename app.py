@@ -2,11 +2,12 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 import query_engine
 import time
+import os
 
 app = Flask(__name__)
 CORS(app) 
 
-@app.route('/')
+@app.route('/', methods=['GET', 'POST'])
 def health_check():
     return jsonify({"status": "healthy", "message": "Brand Influence Query API is running."})
 
@@ -65,10 +66,14 @@ def kubernetes_health():
     })
 
 if __name__ == '__main__':
-    print("Starting API server on port 5001...")
-    print("Health endpoints available:")
-    print("  - http://localhost:5001/health")
-    print("  - http://localhost:5001/ready") 
-    print("  - http://localhost:5001/healthz")
+    # Render requires binding to PORT environment variable and host 0.0.0.0
+    port = int(os.environ.get('PORT', 5001))
     
-    app.run(debug=True, port=5001)
+    print(f"Starting API server on port {port}...")
+    print("Health endpoints available:")
+    print(f"  - /health")
+    print(f"  - /ready") 
+    print(f"  - /healthz")
+    
+    # Bind to 0.0.0.0 as required by Render
+    app.run(debug=False, port=port, host='0.0.0.0')
