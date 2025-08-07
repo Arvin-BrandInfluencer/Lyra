@@ -1,16 +1,10 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import query_engine
-import threading
 import time
 
-# Main application
 app = Flask(__name__)
 CORS(app) 
-
-# Health check application
-health_app = Flask(__name__ + '_health')
-CORS(health_app)
 
 @app.route('/')
 def health_check():
@@ -32,45 +26,49 @@ def handle_query():
     except Exception as e:
         return jsonify({"error": "An internal server error occurred.", "details": str(e)}), 500
 
-# Health check endpoints on separate app
-@health_app.route('/health')
+# Health endpoints that support both GET and POST methods
+@app.route('/health', methods=['GET', 'POST'])
 def health_status():
     return jsonify({
         "status": "healthy", 
         "message": "Brand Influence Query API health check",
         "timestamp": time.time(),
-        "service": "query-api"
+        "service": "query-api",
+        "method": request.method
     })
 
-@health_app.route('/ready')
+@app.route('/ready', methods=['GET', 'POST'])
 def readiness_check():
     try:
-        # You can add more sophisticated readiness checks here
-        # For example, checking database connectivity
+        # Add more sophisticated readiness checks here if needed
+        # For example, checking database connectivity with Supabase
         return jsonify({
             "status": "ready",
             "message": "Service is ready to accept requests",
-            "timestamp": time.time()
+            "timestamp": time.time(),
+            "method": request.method
         })
     except Exception as e:
         return jsonify({
             "status": "not ready",
             "message": f"Service readiness check failed: {str(e)}",
-            "timestamp": time.time()
+            "timestamp": time.time(),
+            "method": request.method
         }), 503
 
-def run_health_server():
-    """Run the health check server on a separate port"""
-    health_app.run(debug=False, port=8080, host='0.0.0.0')
+@app.route('/healthz', methods=['GET', 'POST'])
+def kubernetes_health():
+    """Kubernetes-style health check endpoint"""
+    return jsonify({
+        "status": "ok",
+        "timestamp": time.time()
+    })
 
 if __name__ == '__main__':
-    # Start health check server in a separate thread
-    health_thread = threading.Thread(target=run_health_server, daemon=True)
-    health_thread.start()
-    
-    # Start main application server
-    print("Starting main API server on port 5001...")
-    print("Health check server running on port 8080...")
-    print("Health endpoints: http://localhost:8080/health and http://localhost:8080/ready")
+    print("Starting API server on port 5001...")
+    print("Health endpoints available:")
+    print("  - http://localhost:5001/health")
+    print("  - http://localhost:5001/ready") 
+    print("  - http://localhost:5001/healthz")
     
     app.run(debug=True, port=5001)
