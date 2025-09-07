@@ -1,5 +1,5 @@
 # ================================================
-# FILE: app.py (FINAL VERSION - FIXES JSON SERIALIZATION ERROR)
+# FILE: app.py (UPDATED WITH CUSTOM RANGE BREAKDOWN)
 # ================================================
 import os
 import sys
@@ -153,6 +153,9 @@ def _get_analytics_data_from_view(payload: Dict[str, Any]):
         if view == "summary": return _influencer_process_summary(df, payload)
         if view == "discovery_tiers": return _influencer_process_discovery_tiers(df, payload)
         if view == "monthly_breakdown": return _influencer_process_monthly_breakdown(df)
+        # --- START: NEW CODE ADDITION ---
+        if view == "custom_range_breakdown": return _influencer_process_custom_range_breakdown(df, payload)
+        # --- END: NEW CODE ADDITION ---
         
         return {"error": f"Invalid view '{view}'."}
     except Exception as e:
@@ -226,6 +229,64 @@ def _influencer_process_monthly_breakdown(df: pd.DataFrame):
         
     results.sort(key=lambda x: MONTH_ORDER.get(x['month'], 99))
     return {"source": "monthly_breakdown", "monthly_data": results}
+
+# --- START: NEW FUNCTION ADDITION ---
+def _influencer_process_custom_range_breakdown(df: pd.DataFrame, payload: dict):
+    logger.info("Starting custom range breakdown processing.")
+    try:
+        filters = payload.get("filters", {})
+        date_from = filters.get("date_from")
+        date_to = filters.get("date_to")
+
+        if not date_from or not date_to:
+            return {"error": "The 'date_from' and 'date_to' filters are required for this view."}
+
+        if 'live_date_clean' not in df.columns:
+            return {"error": "The required 'live_date_clean' column is not available in the data source."}
+
+        # Convert live_date_clean to datetime objects for proper comparison
+        df['live_date_clean'] = pd.to_datetime(df['live_date_clean'], errors='coerce')
+        df.dropna(subset=['live_date_clean'], inplace=True) # Drop rows with invalid dates
+
+        # Filter the DataFrame to the specified date range
+        mask = (df['live_date_clean'] >= pd.to_datetime(date_from)) & (df['live_date_clean'] <= pd.to_datetime(date_to))
+        filtered_df = df.loc[mask]
+
+        if filtered_df.empty:
+            logger.warning(f"No data found for the date range {date_from} to {date_to}")
+            return {"summary": {}, "details": []}
+
+        # --- Aggregation logic (similar to monthly breakdown but for the whole range) ---
+        total_spend_eur = float(sum(convert_to_eur(row['total_budget_clean'], row['currency']) for _, row in filtered_df.iterrows()))
+        total_conversions = int(filtered_df['actual_conversions_clean'].sum())
+
+        summary = {
+            'total_spend_eur': total_spend_eur,
+            'total_conversions': total_conversions,
+            'avg_cac_eur': total_spend_eur / total_conversions if total_conversions else 0.0,
+            'influencer_count': int(filtered_df['influencer_name'].nunique())
+        }
+
+        details = filtered_df[['influencer_name', 'market', 'currency', 'total_budget_clean', 'actual_conversions_clean', 'live_date_clean']].rename(columns={
+            'total_budget_clean': 'budget_local',
+            'actual_conversions_clean': 'conversions',
+            'live_date_clean': 'live_date' # Rename for clarity in output
+        })
+        details['cac_local'] = (details['budget_local'] / details['conversions']).fillna(0).replace([float('inf'), -float('inf')], 0)
+        # Convert datetime back to string for JSON serialization
+        details['live_date'] = details['live_date'].dt.strftime('%Y-%m-%d')
+
+
+        return {
+            "source": "custom_range_breakdown",
+            "date_range": {"from": date_from, "to": date_to},
+            "summary": summary,
+            "details": details.to_dict(orient='records')
+        }
+    except Exception as e:
+        logger.error(f"Custom range breakdown failed: {e}\n{traceback.format_exc()}")
+        return {"error": f"Custom range breakdown failed: {str(e)}"}
+# --- END: NEW FUNCTION ADDITION ---
 
 def _influencer_process_profile(df: pd.DataFrame, influencer_name: str):
     influencer_df = df.copy()
